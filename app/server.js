@@ -10,6 +10,7 @@ const { fetchUserData } = require('./twitter');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
+const FAVORITES_FILE = path.join(DATA_DIR, '_favorites.json');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -83,6 +84,29 @@ app.post('/api/hidden', (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// Global favorites — GET returns all, POST adds/removes a post
+app.get('/api/favorites', (req, res) => {
+  try {
+    if (!fs.existsSync(FAVORITES_FILE)) return res.json({});
+    res.json(JSON.parse(fs.readFileSync(FAVORITES_FILE, 'utf8')));
+  } catch { res.json({}); }
+});
+
+app.post('/api/favorites', (req, res) => {
+  const { post, remove } = req.body || {};
+  if (!post?.id) return res.status(400).json({ error: 'post required' });
+  try {
+    let favs = {};
+    if (fs.existsSync(FAVORITES_FILE)) {
+      favs = JSON.parse(fs.readFileSync(FAVORITES_FILE, 'utf8'));
+    }
+    if (remove) delete favs[post.id];
+    else favs[post.id] = post;
+    fs.writeFileSync(FAVORITES_FILE, JSON.stringify(favs));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Stream more posts starting from the stored cursor (SSE)

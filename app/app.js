@@ -223,6 +223,9 @@ let sortMode     = 'newest';   // 'newest' | 'oldest' | 'likes'
 let numCols      = 5;
 let editMode     = false;
 let hiddenIds    = new Set();
+let GLOBAL_FAVORITES = {};   // postId → full post object, persists across handles
+let favoriteIds      = new Set(); // derived from GLOBAL_FAVORITES
+let favoritesMode    = false;
 
 const GRID = { GAP: 18, EASE: 0.1, POOL: 500, BUFFER: 640 };
 
@@ -254,7 +257,13 @@ let colWidth    = 0;
 
 function buildLayout() {
   applySortAndFilter();
-  VISIBLE = editMode ? SORTED : SORTED.filter(p => !hiddenIds.has(p.id));
+  if (favoritesMode) {
+    // Show bookmarks from ALL handles, sorted newest first
+    VISIBLE = Object.values(GLOBAL_FAVORITES)
+      .sort((a, b) => new Date(b.postedAt) - new Date(a.postedAt));
+  } else {
+    VISIBLE = editMode ? SORTED : SORTED.filter(p => !hiddenIds.has(p.id));
+  }
 
   if      (activeLayout === 'feed') buildFeedLayout();
   else if (activeLayout === 'grid') buildGridLayout();
@@ -283,11 +292,15 @@ function buildMasonryLayout() {
 
   totalHeight = Math.ceil(Math.max(...heights, 1));
 
-  for (let c = 0; c < cols; c++) {
-    const col = columns[c];
-    if (col.length <= 1 || heights[c] >= totalHeight) continue;
-    const extra = (totalHeight - heights[c]) / col.length;
-    col.forEach((item, i) => { item.y += extra * i; });
+  // Justify columns to equal height only when there's enough content to tile (normal wall)
+  // Skip when few items (favorites) — justification creates ugly gaps with sparse content
+  if (totalHeight >= window.innerHeight * 2) {
+    for (let c = 0; c < cols; c++) {
+      const col = columns[c];
+      if (col.length <= 1 || heights[c] >= totalHeight) continue;
+      const extra = (totalHeight - heights[c]) / col.length;
+      col.forEach((item, i) => { item.y += extra * i; });
+    }
   }
 
   layoutItems = [];
@@ -393,7 +406,7 @@ function acquire() {
 function release(el) {
   el.style.display    = 'none';
   el.style.visibility = '';
-  el.classList.remove('is-hidden');
+  el.classList.remove('is-hidden', 'is-favorite');
   el.querySelector('.video-badge').style.display = 'none';
   el.querySelector('.multi-badge').style.display = 'none';
   el.querySelector('.hover-stats').innerHTML = '';
@@ -419,10 +432,13 @@ function render() {
   const lockX   = activeLayout === 'feed' || activeLayout === 'grid';
   const centerX = lockX ? Math.floor((vw - totalWidth) / 2) : 0;
 
+  // Disable tiling when content is small enough to repeat in the viewport (e.g. favorites)
+  const noTile = totalHeight < vh * 2;
+
   const tileX0 = lockX ? 0 : Math.floor((Math.min(cx, cam.tx) - buf) / totalWidth);
   const tileX1 = lockX ? 0 : Math.floor((Math.max(cx, cam.tx) + vw + buf) / totalWidth);
-  const tileY0 = Math.floor((Math.min(cy, cam.ty) - buf) / totalHeight);
-  const tileY1 = Math.floor((Math.max(cy, cam.ty) + vh + buf) / totalHeight);
+  const tileY0 = noTile ? 0 : Math.floor((Math.min(cy, cam.ty) - buf) / totalHeight);
+  const tileY1 = noTile ? 0 : Math.floor((Math.max(cy, cam.ty) + vh + buf) / totalHeight);
 
   const visible = new Set();
 
@@ -446,6 +462,7 @@ function render() {
             existing.el.style.transform = `translate3d(${sx}px,${sy}px,0)`;
           }
           existing.el.classList.toggle('is-hidden', editMode && hiddenIds.has(item.post.id));
+          existing.el.classList.toggle('is-favorite', favoriteIds.has(item.post.id));
         } else {
           const el = acquire();
           if (!el) continue;
@@ -477,6 +494,7 @@ function render() {
           el.style.height    = `${item.h}px`;
           el.style.transform = `translate3d(${sx}px,${sy}px,0)`;
           el.classList.toggle('is-hidden', editMode && hiddenIds.has(item.post.id));
+          el.classList.toggle('is-favorite', favoriteIds.has(item.post.id));
 
           elToPost.set(el, item.post);
           active.set(key, { el, item });
@@ -591,6 +609,7 @@ function attachPortfolioEvents() {
   });
   document.getElementById('lightbox-prev').addEventListener('click', () => navigateLightbox(-1));
   document.getElementById('lightbox-next').addEventListener('click', () => navigateLightbox(+1));
+  document.getElementById('lb-fav-btn').addEventListener('click', toggleFavorite);
   document.getElementById('copy-link-btn').addEventListener('click', copyPostLink);
   document.getElementById('lb-download-btn').addEventListener('click', downloadCurrentImage);
   document.getElementById('lb-play-btn').addEventListener('click', toggleSlideshow);
@@ -836,7 +855,16 @@ function _updateLbInfo(post) {
   const info = document.getElementById('lightbox-info');
   info.style.top = `${lbState.endY + lbState.endH + 12}px`;
 
+  _updateLbFavoriteBtn(post);
   _updateLbNavBtns();
+}
+
+function _updateLbFavoriteBtn(post) {
+  const btn = document.getElementById('lb-fav-btn');
+  if (!btn) return;
+  const isFav = favoriteIds.has(post.id);
+  btn.classList.toggle('active', isFav);
+  btn.title = isFav ? 'Remove from favorites' : 'Add to favorites';
 }
 
 function _updateLbNavBtns() {
@@ -975,6 +1003,33 @@ function saveHidden() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ handle: HANDLE, hiddenIds: [...hiddenIds] }),
   }).catch(() => {});
+}
+
+function saveFavoriteToServer(post, remove) {
+  fetch('/api/favorites', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ post, remove }),
+  }).catch(() => {});
+}
+
+function toggleFavorite() {
+  const post = VISIBLE[lbState.postIndex];
+  if (!post) return;
+  const isFav = favoriteIds.has(post.id);
+  if (isFav) {
+    favoriteIds.delete(post.id);
+    delete GLOBAL_FAVORITES[post.id];
+    saveFavoriteToServer(post, true);
+  } else {
+    favoriteIds.add(post.id);
+    GLOBAL_FAVORITES[post.id] = post;
+    saveFavoriteToServer(post, false);
+  }
+  _updateLbFavoriteBtn(post);
+  const el = lbState.sourceEl;
+  if (el) el.classList.toggle('is-favorite', !isFav);
+  if (favoritesMode) { buildLayout(); render(); }
 }
 
 function updateEditCounter() {
@@ -1209,6 +1264,24 @@ function buildToolbar() {
   sortGroup.appendChild(sortBtn);
   toolbar.appendChild(sortGroup);
 
+  // ── Favorites filter
+  const favGroup = makeGlassGroup();
+  const favFilterBtn = document.createElement('button');
+  favFilterBtn.id = 'fav-filter-btn';
+  favFilterBtn.className = 'toolbar-btn';
+  favFilterBtn.setAttribute('data-tooltip', 'Show favorites');
+  favFilterBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+  favFilterBtn.addEventListener('click', () => {
+    favoritesMode = !favoritesMode;
+    favFilterBtn.classList.toggle('active', favoritesMode);
+    favFilterBtn.setAttribute('data-tooltip', favoritesMode ? 'Show all posts' : 'Show favorites');
+    cam.x = cam.y = cam.tx = cam.ty = 0;
+    for (const [k, e] of active) { release(e.el); active.delete(k); }
+    buildLayout(); render();
+  });
+  favGroup.appendChild(favFilterBtn);
+  toolbar.appendChild(favGroup);
+
   // ── Edit group (localhost only)
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     const editGroup = makeGlassGroup();
@@ -1316,6 +1389,7 @@ function launchPortfolio(data, handle) {
   PROFILE      = data.profile || null;
   HANDLE       = handle;
   hiddenIds    = new Set(data.hiddenIds || []);
+  favoritesMode = false;
   FETCH_META   = { fetchedAt: data.fetchedAt || null, hasMore: data.hasMore || false, tweetsCount: data.profile?.tweetsCount || data.tweetsCount || 0 };
   activeLayout = 'masonry';
   sortMode     = 'newest';
@@ -1348,6 +1422,15 @@ function launchPortfolio(data, handle) {
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
+
+// Load global favorites once at startup — persists across all handle switches
+fetch('/api/favorites')
+  .then(r => r.json())
+  .then(data => {
+    GLOBAL_FAVORITES = data || {};
+    favoriteIds = new Set(Object.keys(GLOBAL_FAVORITES));
+  })
+  .catch(() => {});
 
 initTheme();
 showView('landing');
