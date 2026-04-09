@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>twitter-dash</title>
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300..700;1,14..32,300..700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ── Landing ─────────────────────────────────────────────────── -->
+  <section id="view-landing" class="view">
+    <div class="orb-field">
+      <div class="orb orb-1"></div>
+      <div class="orb orb-2"></div>
+      <div class="orb orb-3"></div>
+      <div class="orb orb-4"></div>
+    </div>
+    <div class="glass-card landing-card">
+      <div class="landing-badge">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.253 5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+        twitter-dash
+      </div>
+      <h1 class="landing-heading">Explore any<br>account's media.</h1>
+      <form id="handle-form" autocomplete="off">
+        <div class="glass-input-wrap" id="handle-field">
+          <span class="handle-at">@</span>
+          <input id="handle-input" type="text" class="handle-input"
+            placeholder="username" spellcheck="false"
+            autocomplete="off" autocorrect="off" autocapitalize="off">
+          <button type="submit" class="glass-btn-circle" aria-label="Load">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"/>
+              <polyline points="12 5 19 12 12 19"/>
+            </svg>
+          </button>
+        </div>
+        <p id="handle-error" class="handle-error" aria-live="polite"></p>
+      </form>
+      <p class="landing-hint">Works with any public Twitter / X account</p>
+      <div id="recent-handles" class="recent-handles"></div>
+    </div>
+  </section>
+
+  <!-- ── Loading ─────────────────────────────────────────────────── -->
+  <section id="view-loading" class="view" hidden>
+    <div class="orb-field">
+      <div class="orb orb-1"></div>
+      <div class="orb orb-3"></div>
+    </div>
+    <div class="glass-card loading-card">
+      <div class="loading-avatar-ring">
+        <img id="loading-avatar" class="loading-avatar" src="" alt="" hidden>
+        <div class="loading-avatar-placeholder">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        </div>
+      </div>
+      <div class="loading-handle">@<span id="loading-handle-name"></span></div>
+      <div class="loading-bar-track">
+        <div id="loading-bar" class="loading-bar-fill"></div>
+      </div>
+      <p id="loading-status" class="loading-status">Connecting...</p>
+      <p id="loading-count" class="loading-count"></p>
+      <button id="loading-cancel" class="glass-pill-btn">Cancel</button>
+    </div>
+  </section>
+
+  <!-- ── Portfolio ───────────────────────────────────────────────── -->
+  <section id="view-portfolio" class="view" hidden>
+    <div id="viewport" class="portfolio-viewport">
+      <div id="container"><div id="grid"></div></div>
+    </div>
+
+    <!-- Lightbox -->
+    <div id="lightbox-overlay" class="lightbox-overlay">
+      <button id="lightbox-close" class="lb-close" aria-label="Close">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+      <button id="lightbox-prev" class="lb-nav lb-prev" aria-label="Previous post">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <button id="lightbox-next" class="lb-nav lb-next" aria-label="Next post">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+      <div id="lightbox-info" class="lb-info glass-card lb-glass">
+        <p id="lightbox-caption" class="lb-caption"></p>
+        <div id="img-dots" class="img-dots"></div>
+        <div class="lb-meta">
+          <div id="lightbox-stats" class="lb-stats"></div>
+          <span id="lb-date" class="lb-date"></span>
+        </div>
+        <div class="lb-footer">
+          <a id="lightbox-link" class="lb-primary-btn" href="#" target="_blank" rel="noopener noreferrer">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            View on X
+          </a>
+          <div class="lb-icon-actions">
+            <button id="copy-link-btn" class="lb-icon-btn" title="Copy link">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+            <button id="lb-download-btn" class="lb-icon-btn" title="Download image">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </button>
+            <div class="lb-sep"></div>
+            <button id="lb-speed-btn" class="lb-speed-chip" title="Slideshow speed">
+              <span id="lb-speed-label">3s</span>
+            </button>
+            <button id="lb-play-btn" class="lb-play-circle" aria-label="Play slideshow">
+              <svg id="lb-play-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+              <svg id="lb-pause-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:none"><rect x="5" y="4" width="4" height="16" rx="1"/><rect x="15" y="4" width="4" height="16" rx="1"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script src="node_modules/motion/dist/motion.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "twitter-dash",
+  "version": "2.0.0",
+  "description": "Explore any Twitter account's media as a visual gallery",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2",
+    "motion": "^12.38.0"
+  }
+}
