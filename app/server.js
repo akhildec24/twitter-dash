@@ -3,6 +3,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
 const { exec } = require('child_process');
 const { fetchUserData } = require('./twitter');
 
@@ -50,8 +51,8 @@ app.get('/api/fetch', (req, res) => {
 
   fetchUserData(handle, maxPosts, (progress) => emit('progress', progress))
     .then((data) => {
-      // Store userId so load-more can skip re-fetching the profile
-      if (!data.userId && data.profile) data.userId = null; // will be set by twitter.js
+        // Hoist tweetsCount to top-level so it survives load-more merges
+      if (data.profile?.tweetsCount) data.tweetsCount = data.profile.tweetsCount;
       fs.writeFileSync(dataPath(handle), JSON.stringify(data));
       emit('done', data);
       res.end();
@@ -97,12 +98,6 @@ app.get('/api/load-more', (req, res) => {
   catch { res.status(500).json({ error: 'corrupt cache' }); return; }
 
   const { nextCursor, userId } = existing;
-  if (!nextCursor) {
-    res.status(400).json({ error: 'no_more', message: 'No more pages available' });
-    return;
-  }
-
-  const maxMore = Math.min(parseInt(req.query.maxPosts) || 200, 500);
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -112,6 +107,14 @@ app.get('/api/load-more', (req, res) => {
 
   const emit = (event, data) =>
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+  if (!nextCursor) {
+    emit('error', { message: 'No more pages cached — click ↻ Reload to re-fetch this account and enable Load more.' });
+    res.end();
+    return;
+  }
+
+  const maxMore = Math.min(parseInt(req.query.maxPosts) || 200, 500);
 
   fetchUserData(handle, maxMore, (p) => emit('progress', p), nextCursor, userId)
     .then((newData) => {
@@ -142,6 +145,33 @@ app.delete('/api/cache/:handle', (req, res) => {
   const file = dataPath(handle);
   if (fs.existsSync(file)) fs.unlinkSync(file);
   res.json({ ok: true });
+});
+
+// Proxy Twitter CDN videos — browser CORS blocks direct video.twimg.com requests from localhost
+app.get('/api/proxy-video', (req, res) => {
+  const url = req.query.url;
+  if (!url || !url.startsWith('https://video.twimg.com/')) {
+    return res.status(400).json({ error: 'only video.twimg.com URLs allowed' });
+  }
+
+  const headers = {
+    'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+    'referer': 'https://x.com/',
+    'accept': '*/*',
+  };
+  if (req.headers.range) headers['range'] = req.headers.range;
+
+  const u = new URL(url);
+  https.request({ hostname: u.hostname, path: u.pathname + u.search, method: 'GET', headers }, (upstream) => {
+    res.status(upstream.statusCode);
+    ['content-type', 'content-length', 'content-range', 'accept-ranges'].forEach(h => {
+      if (upstream.headers[h]) res.setHeader(h, upstream.headers[h]);
+    });
+    upstream.pipe(res);
+  }).on('error', (e) => {
+    console.error('[proxy-video]', e.message);
+    res.status(502).end();
+  }).end();
 });
 
 // ─── Static files ─────────────────────────────────────────────────────────────

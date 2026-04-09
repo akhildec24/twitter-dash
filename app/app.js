@@ -122,7 +122,7 @@ function addRecentHandle(h) {
 let activeSSE = null;
 
 function startLoading(handle, isLoadMore) {
-  if (!isLoadMore) showView('loading');
+  showView('loading');
 
   const get   = id => document.getElementById(id);
   const nameEl   = get('loading-handle-name');
@@ -132,20 +132,26 @@ function startLoading(handle, isLoadMore) {
   const barEl    = get('loading-bar');
   const cancelEl = get('loading-cancel');
 
-  if (nameEl)   nameEl.textContent  = handle;
-  if (statusEl) { statusEl.textContent = 'Connecting...'; statusEl.style.color = ''; }
-  if (countEl)  countEl.textContent  = '';
-  if (avatarEl) avatarEl.hidden = true;
+  if (nameEl)   nameEl.textContent = handle;
+  if (countEl)  countEl.textContent = '';
   if (barEl)    { barEl.style.width = '0%'; barEl.classList.add('indeterminate'); }
 
+  if (isLoadMore) {
+    // Pre-fill avatar + status for load-more (profile already known)
+    if (PROFILE?.avatar && avatarEl) { avatarEl.src = PROFILE.avatar; avatarEl.hidden = false; }
+    if (statusEl) { statusEl.textContent = 'Fetching next 200...'; statusEl.style.color = ''; }
+  } else {
+    if (avatarEl) avatarEl.hidden = true;
+    if (statusEl) { statusEl.textContent = 'Connecting...'; statusEl.style.color = ''; }
+  }
+
   if (cancelEl) {
-    // Remove old handler by replacing node
     const fresh = cancelEl.cloneNode(true);
     cancelEl.replaceWith(fresh);
     fresh.textContent = 'Cancel';
     fresh.addEventListener('click', () => {
       activeSSE?.close(); activeSSE = null;
-      if (isLoadMore) setLoadMoreIdle(); else showView('landing');
+      if (isLoadMore) showView('portfolio'); else showView('landing');
     }, { once: true });
   }
 
@@ -163,8 +169,10 @@ function startLoading(handle, isLoadMore) {
       barEl.classList.remove('indeterminate');
       const pct = d.maxPosts ? Math.min(96, (d.total / d.maxPosts) * 100) : 0;
       barEl.style.width = `${Math.max(pct, 4)}%`;
-      if (statusEl) statusEl.textContent = `Fetching page ${d.page}...`;
-      if (countEl)  countEl.textContent  = d.total > 0 ? `${d.total} posts found` : '';
+      if (statusEl) statusEl.textContent = isLoadMore
+        ? `Fetching page ${d.page}... (${d.total} new)`
+        : `Fetching page ${d.page}...`;
+      if (countEl) countEl.textContent = d.total > 0 ? `${d.total} posts found` : '';
     }
   });
 
@@ -174,7 +182,12 @@ function startLoading(handle, isLoadMore) {
     const data = JSON.parse(e.data);
 
     if (isLoadMore) {
-      appendPosts(data.newPosts || [], data.total, data.hasMore);
+      if (statusEl) statusEl.textContent = `Added ${data.newPosts?.length || 0} posts`;
+      if (countEl)  countEl.textContent  = `${data.total} total`;
+      setTimeout(() => {
+        appendPosts(data.newPosts || [], data.total, data.hasMore);
+        showView('portfolio');
+      }, 500);
     } else {
       if (data.profile?.avatar && avatarEl) { avatarEl.src = data.profile.avatar; avatarEl.hidden = false; }
       if (statusEl) statusEl.textContent = 'Done!';
@@ -188,13 +201,9 @@ function startLoading(handle, isLoadMore) {
     if (barEl) barEl.classList.remove('indeterminate');
     let msg = 'Something went wrong.';
     try { msg = JSON.parse(e.data).message; } catch {}
-    if (isLoadMore) {
-      setLoadMoreError(msg);
-    } else {
-      if (statusEl) { statusEl.textContent = `Error: ${msg}`; statusEl.style.color = 'rgba(239,68,68,0.9)'; }
-      const c = document.getElementById('loading-cancel');
-      if (c) c.textContent = '← Back';
-    }
+    if (statusEl) { statusEl.textContent = `Error: ${msg}`; statusEl.style.color = 'rgba(239,68,68,0.9)'; }
+    const c = document.getElementById('loading-cancel');
+    if (c) c.textContent = isLoadMore ? '← Back to portfolio' : '← Back';
   });
 }
 
@@ -207,7 +216,7 @@ let SORTED       = [];   // ALL_POSTS after applying sort
 let VISIBLE      = [];   // SORTED after applying edit/hidden filter
 let PROFILE      = null;
 let HANDLE       = null;
-let FETCH_META   = { fetchedAt: null, hasMore: false };
+let FETCH_META   = { fetchedAt: null, hasMore: false, tweetsCount: 0 };
 
 let activeLayout = 'masonry';
 let sortMode     = 'newest';   // 'newest' | 'oldest' | 'likes'
@@ -757,7 +766,8 @@ function _loadHiRes(clone, mediaItem) {
     // Inject a <video> element on top of the thumbnail
     const vid = document.createElement('video');
     vid.className = 'lb-video';
-    vid.src = mediaItem.videoUrl;
+    // Proxy through server to avoid CORS 403 from video.twimg.com
+    vid.src = `/api/proxy-video?url=${encodeURIComponent(mediaItem.videoUrl)}`;
     vid.controls = true;
     vid.autoplay = true;
     vid.muted = true;  // required for autoplay in all browsers
@@ -766,6 +776,7 @@ function _loadHiRes(clone, mediaItem) {
     vid.poster = mediaItem.url;
     vid.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;border-radius:12px;background:#000;z-index:2;';
     clone.appendChild(vid);
+    vid.play().catch(() => {}); // explicit play needed for dynamically-inserted elements
     return;
   }
 
@@ -977,20 +988,18 @@ function updateEditCounter() {
 // ── Load more ─────────────────────────────────────────────────────────────────
 
 function setLoadMoreIdle() {
-  const btn = document.getElementById('load-more-btn');
+  const btn = document.getElementById('ph-load-more-btn');
   if (!btn) return;
   btn.disabled = false;
-  btn.querySelector('.load-more-label').textContent = 'Load more';
-  btn.querySelector('.load-more-spinner').style.display = 'none';
+  btn.textContent = '+ 200';
 }
 
 function setLoadMoreError(msg) {
-  const btn = document.getElementById('load-more-btn');
+  const btn = document.getElementById('ph-load-more-btn');
   if (!btn) return;
   btn.disabled = false;
-  btn.title = `Error: ${msg}`;
-  btn.querySelector('.load-more-label').textContent = 'Retry';
-  btn.querySelector('.load-more-spinner').style.display = 'none';
+  btn.setAttribute('data-tooltip', `Error: ${msg}`);
+  btn.textContent = 'Retry';
 }
 
 function appendPosts(newPosts, total, hasMore) {
@@ -1002,10 +1011,9 @@ function appendPosts(newPosts, total, hasMore) {
     buildLayout();
     for (const [k, e] of active) { release(e.el); active.delete(k); }
     render();
-    updateProfileHeader();
   }
-  const btn = document.getElementById('load-more-btn');
-  if (btn) { if (!hasMore) btn.style.display = 'none'; else setLoadMoreIdle(); }
+  // Always rebuild header so button state + count updates
+  buildProfileHeader();
 }
 
 // ── Profile header ────────────────────────────────────────────────────────────
@@ -1013,9 +1021,15 @@ function appendPosts(newPosts, total, hasMore) {
 function updateProfileHeader() {
   const count = ALL_POSTS.filter(p => p.images?.length > 0).length;
   const c = document.getElementById('ph-count');
-  if (c) c.textContent = `${count} posts`;
+  if (c) c.textContent = _countLabel(count);
   const a = document.getElementById('ph-ago');
   if (a && FETCH_META.fetchedAt) a.textContent = timeAgo(FETCH_META.fetchedAt);
+}
+
+function _countLabel(fetched) {
+  const total = FETCH_META.tweetsCount;
+  if (total > 0) return `${fmtNum(fetched)} / ${fmtNum(total)} posts`;
+  return `${fmtNum(fetched)} posts`;
 }
 
 function buildProfileHeader() {
@@ -1054,7 +1068,7 @@ function buildProfileHeader() {
 
   const countEl = document.createElement('span');
   countEl.id = 'ph-count'; countEl.className = 'ph-meta-item';
-  countEl.textContent = `${ALL_POSTS.filter(p => p.images?.length).length} posts`;
+  countEl.textContent = _countLabel(ALL_POSTS.filter(p => p.images?.length).length);
   meta.appendChild(countEl);
 
   if (FETCH_META.fetchedAt) {
@@ -1067,14 +1081,31 @@ function buildProfileHeader() {
 
   right.appendChild(meta);
 
+  // Load more button — always visible when there are likely more posts
+  const fetched = ALL_POSTS.filter(p => p.images?.length).length;
+  const mightHaveMore = FETCH_META.hasMore || (FETCH_META.tweetsCount > fetched);
+  if (mightHaveMore) {
+    const loadMoreBtn = document.createElement('button');
+    loadMoreBtn.id = 'ph-load-more-btn';
+    loadMoreBtn.className = 'ph-load-more-btn';
+    loadMoreBtn.setAttribute('data-tooltip', 'Fetch next 200 posts');
+    loadMoreBtn.textContent = '+ 200';
+    loadMoreBtn.addEventListener('click', () => {
+      loadMoreBtn.disabled = true;
+      loadMoreBtn.textContent = '…';
+      startLoading(HANDLE, true);
+    });
+    right.appendChild(loadMoreBtn);
+  }
+
   const resetBtn = document.createElement('button');
-  resetBtn.className = 'ph-refresh-btn'; resetBtn.title = 'Search another account';
+  resetBtn.className = 'ph-refresh-btn'; resetBtn.setAttribute('data-tooltip', 'Search account');
   resetBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
   resetBtn.addEventListener('click', () => goToLanding());
   right.appendChild(resetBtn);
 
   const reloadBtn = document.createElement('button');
-  reloadBtn.className = 'ph-refresh-btn'; reloadBtn.title = 'Re-fetch all posts';
+  reloadBtn.className = 'ph-refresh-btn'; reloadBtn.setAttribute('data-tooltip', 'Re-fetch posts');
   reloadBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`;
   reloadBtn.addEventListener('click', async () => {
     reloadBtn.classList.add('spinning');
@@ -1112,11 +1143,12 @@ function buildToolbar() {
   // ── Layout group
   const layoutGroup = makeGlassGroup();
   [
-    { id: 'masonry', icon: 'assets/masonry.svg', label: 'Masonry' },
-    { id: 'grid',    icon: 'assets/grid.svg',    label: 'Grid' },
-    { id: 'feed',    icon: 'assets/feed.svg',    label: 'Feed' },
+    { id: 'masonry', icon: 'assets/masonry.svg', label: 'Masonry layout' },
+    { id: 'grid',    icon: 'assets/grid.svg',    label: 'Grid layout' },
+    { id: 'feed',    icon: 'assets/feed.svg',    label: 'Feed layout' },
   ].forEach(l => {
     const btn = makeIconBtn(l.icon, l.label, l.id === activeLayout);
+    btn.setAttribute('data-tooltip', l.label);
     btn.addEventListener('click', () => {
       layoutGroup.querySelectorAll('.toolbar-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
@@ -1135,6 +1167,8 @@ function buildToolbar() {
 
   const colMinus = makeLabelBtn('−', 'Fewer columns');
   const colPlus  = makeLabelBtn('+', 'More columns');
+  colMinus.setAttribute('data-tooltip', 'Fewer columns');
+  colPlus.setAttribute('data-tooltip', 'More columns');
   colMinus.addEventListener('click', () => {
     if (numCols <= 2) return;
     numCols--;
@@ -1156,7 +1190,7 @@ function buildToolbar() {
   const sortLabels = { newest: '↓ Date', oldest: '↑ Date', likes: '♥ Top' };
   const sortBtn = document.createElement('button');
   sortBtn.className = 'toolbar-btn load-more-btn'; // reuse style for text btn
-  sortBtn.title = 'Change sort order';
+  sortBtn.setAttribute('data-tooltip', 'Cycle sort order');
   sortBtn.style.minWidth = '62px';
 
   const updateSortBtn = () => {
@@ -1178,7 +1212,8 @@ function buildToolbar() {
   // ── Edit group (localhost only)
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     const editGroup = makeGlassGroup();
-    const editBtn = makeIconBtn('assets/edit.svg', 'Edit — click posts to hide/show', false);
+    const editBtn = makeIconBtn('assets/edit.svg', 'Hide / show posts', false);
+    editBtn.setAttribute('data-tooltip', 'Hide / show posts');
     editBtn.id = 'edit-btn';
     const counter = document.createElement('span');
     counter.id = 'edit-counter'; counter.className = 'edit-counter';
@@ -1191,39 +1226,34 @@ function buildToolbar() {
       for (const [k, e] of active) { release(e.el); active.delete(k); }
       buildLayout(); render();
     });
-    editGroup.append(editBtn, counter);
-    toolbar.appendChild(editGroup);
-  }
 
-  // ── Load more (if available)
-  if (FETCH_META.hasMore) {
-    const moreGroup = makeGlassGroup();
-    const moreBtn = document.createElement('button');
-    moreBtn.id = 'load-more-btn'; moreBtn.className = 'toolbar-btn load-more-btn';
-    moreBtn.title = 'Load more posts';
-    moreBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
-      <span class="load-more-label">Load more</span>
-      <span class="load-more-spinner" style="display:none"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" class="spinner-icon"><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0"/></svg></span>`;
-    moreBtn.addEventListener('click', () => {
-      if (moreBtn.disabled) return;
-      moreBtn.disabled = true;
-      moreBtn.querySelector('.load-more-label').textContent = 'Fetching...';
-      moreBtn.querySelector('.load-more-spinner').style.display = '';
-      startLoading(HANDLE, true);
+    const cacheBtn = document.createElement('button');
+    cacheBtn.className = 'toolbar-btn';
+    cacheBtn.setAttribute('data-tooltip', 'Reset cache & re-fetch');
+    cacheBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`;
+    cacheBtn.addEventListener('click', async () => {
+      cacheBtn.classList.add('spinning');
+      try { await fetch(`/api/cache/${HANDLE}`, { method: 'DELETE' }); } catch {}
+      goToLoading(HANDLE);
     });
-    moreGroup.appendChild(moreBtn);
-    toolbar.appendChild(moreGroup);
+
+    editGroup.append(editBtn, counter, cacheBtn);
+    toolbar.appendChild(editGroup);
   }
 
   // ── Right: search + theme
   const rightGroup = makeGlassGroup();
   const searchBtn = document.createElement('button');
-  searchBtn.className = 'toolbar-btn'; searchBtn.title = 'Search another account';
+  searchBtn.className = 'toolbar-btn';
+  searchBtn.setAttribute('data-tooltip', 'Search account');
   searchBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
   searchBtn.addEventListener('click', goToLanding);
   rightGroup.appendChild(searchBtn);
 
-  const themeBtn = makeIconBtn('assets/theme.svg', 'Toggle light / dark', false);
+  const themeBtn = document.createElement('button');
+  themeBtn.className = 'toolbar-btn';
+  themeBtn.setAttribute('data-tooltip', 'Toggle theme');
+  themeBtn.innerHTML = `<span class="theme-btn-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.5C7.306 3.5 3.5 7.306 3.5 12S7.306 20.5 12 20.5V3.5ZM2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10S2 17.523 2 12Z"/></svg></span>`;
   themeBtn.addEventListener('click', () => {
     const cur = document.documentElement.getAttribute('data-theme');
     applyTheme(cur === 'dark' ? 'light' : 'dark');
@@ -1270,7 +1300,7 @@ function goToLanding() {
   for (const [k, e] of active) { release(e.el); active.delete(k); }
   cam.x = cam.y = cam.tx = cam.ty = 0;
   ALL_POSTS = []; SORTED = []; VISIBLE = []; PROFILE = null; HANDLE = null;
-  FETCH_META = { fetchedAt: null, hasMore: false };
+  FETCH_META = { fetchedAt: null, hasMore: false, tweetsCount: 0 };
   lbState.open = lbState.animating = false; lbState.sourceEl = null;
   editMode = false; sortMode = 'newest';
   showView('landing');
@@ -1286,7 +1316,7 @@ function launchPortfolio(data, handle) {
   PROFILE      = data.profile || null;
   HANDLE       = handle;
   hiddenIds    = new Set(data.hiddenIds || []);
-  FETCH_META   = { fetchedAt: data.fetchedAt || null, hasMore: data.hasMore || false };
+  FETCH_META   = { fetchedAt: data.fetchedAt || null, hasMore: data.hasMore || false, tweetsCount: data.profile?.tweetsCount || data.tweetsCount || 0 };
   activeLayout = 'masonry';
   sortMode     = 'newest';
   editMode     = false;
